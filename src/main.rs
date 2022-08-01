@@ -1,3 +1,4 @@
+use dxcllistener::Listener;
 use lazy_static::lazy_static;
 use regex::Regex;
 use serde::{Deserialize, Serialize};
@@ -15,12 +16,7 @@ struct Configuration {
     constrings: Vec<String>,
 }
 
-struct ConnectionInformation {
-    callsign: String,
-    host: String,
-    port: u16,
-}
-
+/// Parse configuration
 fn parse_config(path: &Path) -> Result<Configuration, io::Error> {
     let file = File::open(path)?;
     let reader = BufReader::new(file);
@@ -28,7 +24,8 @@ fn parse_config(path: &Path) -> Result<Configuration, io::Error> {
     Ok(config)
 }
 
-fn parse_constring(raw: &str) -> Option<ConnectionInformation> {
+/// Parse connection string from configuration
+fn parse_constring(raw: &str) -> Option<Listener> {
     lazy_static! {
         static ref RE_CONSTR: Regex =
             Regex::new(r#"^(?P<user>.+)@(?P<host>.+):(?P<port>\d+)$"#).unwrap();
@@ -40,11 +37,7 @@ fn parse_constring(raw: &str) -> Option<ConnectionInformation> {
         let port = cap.name("port").unwrap().as_str().parse::<u16>();
 
         if let Ok(p) = port {
-            return Some(ConnectionInformation {
-                callsign: user.into(),
-                host: host.into(),
-                port: p,
-            });
+            return Some(Listener::new(host.into(), p, user.into()));
         }
     }
 
@@ -57,10 +50,10 @@ fn main() {
         parse_config(Path::new("dxclrecorder.json")).expect("Failed to read configuration");
 
     // Parse connection strings
-    let mut coninfo: Vec<ConnectionInformation> = Vec::new();
+    let mut listeners: Vec<Listener> = Vec::new();
     for constring in config.constrings.iter() {
         match parse_constring(constring) {
-            Some(info) => coninfo.push(info),
+            Some(info) => listeners.push(info),
             None => {
                 eprintln!("Found invalid connection string: '{}'", constring);
                 process::exit(1);
@@ -71,13 +64,9 @@ fn main() {
     // Communication channel between listeners and receiver
     let (tx, rx) = mpsc::channel();
 
-    // Create two listener
-    let mut listeners: Vec<dxcllistener::Listener> = Vec::new();
-    for con in coninfo.iter() {
-        listeners.push(
-            dxcllistener::listen(con.host.clone(), con.port, con.callsign.clone(), tx.clone())
-                .unwrap(),
-        );
+    // Start listeners
+    for lis in listeners.iter_mut() {
+        lis.listen(tx.clone()).unwrap();
     }
 
     // Handle incoming spots
@@ -90,7 +79,7 @@ fn main() {
     // Stop signal
     let signal = Arc::new(AtomicBool::new(true));
 
-    // Register ctrl-c handler to stop threads
+    // Register ctrl-c handler to stop listeners
     let sig = signal.clone();
     ctrlc::set_handler(move || {
         println!("Ctrl-C caught");
@@ -98,6 +87,7 @@ fn main() {
     })
     .expect("Failed to listen on Ctrl-C");
 
+    // Main process loop
     while !listeners.is_empty() {
         // Check for application stop request
         if !signal.load(Ordering::Relaxed) {
@@ -125,4 +115,6 @@ fn main() {
 
         std::thread::sleep(std::time::Duration::from_millis(250));
     }
+
+    process::exit(0);
 }

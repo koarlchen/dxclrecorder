@@ -5,7 +5,7 @@ edition = "2021"
 
 
 [dependencies]
-dxcllistener = "0.1.0"
+dxcllistener = "0.2.0"
 ctrlc = "3.2.2"
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"

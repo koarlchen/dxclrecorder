@@ -1,5 +1,8 @@
 {
     "constrings": [
         "INVALID@example.com:1234"
-    ]
+    ],
+    "reconnect": true,
+    "retries": 10,
+    "backoff": 30
 }

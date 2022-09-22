@@ -1,8 +1,20 @@
 {
-    "constrings": [
-        "INVALID@example.com:1234"
-    ],
-    "reconnect": true,
-    "retries": 10,
-    "backoff": 30
+    "connection": {
+        "constrings": [
+            "INVALID@example.com:1234"
+        ],
+        "reconnect": true,
+        "retries": 10,
+        "backoff": 30
+    },
+    "output": {
+        "console": true,
+        "file": false,
+        "filename": "./data.json"
+    },
+    "logging": {
+        "console": true,
+        "file": false,
+        "filepath": "./"
+    }
 }

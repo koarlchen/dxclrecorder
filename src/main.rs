@@ -1,38 +1,23 @@
 #[macro_use]
 extern crate log;
 
-use dxcllistener::Listener;
+use dxcllistener::{Listener, Spot};
 use lazy_static::lazy_static;
 use regex::Regex;
-use serde::{Deserialize, Serialize};
 use simplelog::{
-    format_description, ColorChoice, CombinedLogger, ConfigBuilder, LevelFilter, TermLogger,
-    TerminalMode,
+    format_description, ColorChoice, CombinedLogger, ConfigBuilder, LevelFilter, SharedLogger,
+    TermLogger, TerminalMode, WriteLogger,
 };
 use std::fs::File;
-use std::io;
-use std::io::BufReader;
+use std::io::{BufWriter, Write};
 use std::path::Path;
 use std::process;
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::mpsc::Receiver;
 use std::sync::{mpsc, Arc, Mutex};
 use std::thread;
 
-#[derive(Serialize, Deserialize, Clone)]
-struct Configuration {
-    constrings: Vec<String>,
-    reconnect: bool,
-    retries: u64,
-    backoff: u64,
-}
-
-/// Parse configuration
-fn parse_config(path: &Path) -> Result<Configuration, io::Error> {
-    let file = File::open(path)?;
-    let reader = BufReader::new(file);
-    let config: Configuration = serde_json::from_reader(reader)?;
-    Ok(config)
-}
+mod configuration;
 
 /// Parse connection string from configuration
 fn parse_constring(raw: &str) -> Option<Listener> {
@@ -55,40 +40,47 @@ fn parse_constring(raw: &str) -> Option<Listener> {
 }
 
 /// Initialize logging
-fn init_logging() {
+fn init_logging(config: &configuration::Configuration) {
     let log_config = ConfigBuilder::new()
         .set_time_format_custom(format_description!(
             "[day].[month].[year] [hour]:[minute]:[second]"
         ))
         .build();
 
-    CombinedLogger::init(vec![
-        TermLogger::new(
+    let mut loggers: Vec<Box<dyn SharedLogger>> = vec![];
+
+    if config.logging.console {
+        loggers.push(TermLogger::new(
             LevelFilter::Info,
-            log_config,
+            log_config.clone(),
             TerminalMode::Mixed,
             ColorChoice::Auto,
-        ),
-        /*WriteLogger::new(
+        ))
+    }
+
+    if config.logging.file {
+        loggers.push(WriteLogger::new(
             LevelFilter::Info,
             log_config,
-            File::create(Path::new(&config.log_dir).join(&config.log_file))
+            File::create(Path::new(&config.logging.filepath).join("dxclrecorder.log"))
                 .expect("Failed to create log file"),
-        ),*/
-    ])
-    .unwrap();
+        ))
+    }
+
+    CombinedLogger::init(loggers).unwrap();
 }
 
 fn main() {
-    init_logging();
-
     // Read json configuration
-    let config =
-        parse_config(Path::new("dxclrecorder.json")).expect("Failed to read configuration");
+    let config = configuration::parse_config(Path::new("dxclrecorder.json"))
+        .expect("Failed to read configuration");
+
+    // Initialize logging
+    init_logging(&config);
 
     // Parse connection strings
     let listeners: Arc<Mutex<Vec<Listener>>> = Arc::new(Mutex::new(Vec::new()));
-    for constring in config.constrings.iter() {
+    for constring in config.connection.constrings.iter() {
         match parse_constring(constring) {
             Some(info) => {
                 listeners.lock().unwrap().push(info);
@@ -103,18 +95,8 @@ fn main() {
     // Communication channel between listeners and receiver
     let (tx, rx) = mpsc::channel::<dxcllistener::Spot>();
 
-    // Handle incoming spots
-    thread::spawn(move || {
-        debug!("Receiving thread started");
-
-        //let mut file = File::create("foo.txt").unwrap();
-        while let Ok(spot) = rx.recv() {
-            //file.write_all(spot.to_json().as_bytes()).unwrap();
-            println!("{}", spot.to_json());
-        }
-
-        debug!("Receiving thread finished");
-    });
+    // Start receiver for incoming spots
+    start_receiver(config.clone(), rx);
 
     // Stop signal
     let signal = Arc::new(AtomicBool::new(true));
@@ -164,7 +146,7 @@ fn main() {
                     l.callsign, l.host, l.port, res
                 );
 
-                if config.reconnect {
+                if config.connection.reconnect {
                     let dead = Listener::new(l.host.clone(), l.port, l.callsign.clone());
                     connect_listener(dead, listeners.clone(), config.clone(), tx.clone());
                 }
@@ -180,14 +162,43 @@ fn main() {
     process::exit(0);
 }
 
+/// Start receiver for incoming spots.
+/// The incoming data is processed according to the application configuration.
+fn start_receiver(config: configuration::Configuration, rx: Receiver<Spot>) {
+    // Handle incoming spots
+    thread::spawn(move || {
+        debug!("Receiving thread started");
+
+        let mut write: Option<BufWriter<File>> = None;
+        if config.output.file {
+            write = Some(BufWriter::with_capacity(
+                1024,
+                File::create(Path::new(&config.output.filename)).unwrap(),
+            ));
+        }
+
+        while let Ok(spot) = rx.recv() {
+            if config.output.console {
+                println!("{}", spot.to_json());
+            }
+            if config.output.file {
+                writeln!(write.as_mut().unwrap(), "{}", spot.to_json()).unwrap();
+            }
+        }
+
+        debug!("Receiving thread finished");
+    });
+}
+
+/// (Re-)Connect listener to remote server.
 fn connect_listener(
     mut listener: Listener,
     listeners: Arc<Mutex<Vec<Listener>>>,
-    config: Configuration,
+    config: configuration::Configuration,
     tx: mpsc::Sender<dxcllistener::Spot>,
 ) {
     thread::spawn(move || {
-        let mut recon_ctr = config.retries;
+        let mut recon_ctr = config.connection.retries;
         loop {
             info!("Try to connect listener {}", listener);
             if listener.listen(tx.clone()).is_ok() {
@@ -202,7 +213,7 @@ fn connect_listener(
                 break;
             }
 
-            std::thread::sleep(std::time::Duration::from_secs(config.backoff));
+            std::thread::sleep(std::time::Duration::from_secs(config.connection.backoff));
         }
     });
 }

@@ -15,7 +15,7 @@ use std::process;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::Receiver;
 use std::sync::{mpsc, Arc, Mutex};
-use std::thread;
+use std::thread::{self, JoinHandle};
 
 mod configuration;
 
@@ -96,7 +96,13 @@ fn main() {
     let (tx, rx) = mpsc::channel::<dxcllistener::Spot>();
 
     // Start receiver for incoming spots
-    start_receiver(config.clone(), rx);
+    let receiver = match start_receiver(config.clone(), rx) {
+        Ok(rcv) => rcv,
+        Err(err) => {
+            error!("Failed to start receiver ({})", err);
+            process::exit(1);
+        }
+    };
 
     // Stop signal
     let signal = Arc::new(AtomicBool::new(true));
@@ -104,7 +110,7 @@ fn main() {
     // Register ctrl-c handler to stop listeners
     let sig = signal.clone();
     ctrlc::set_handler(move || {
-        debug!("Ctrl-C caught");
+        info!("Requested shutdown");
         sig.store(false, Ordering::Relaxed);
     })
     .expect("Failed to listen on Ctrl-C");
@@ -159,35 +165,59 @@ fn main() {
         std::thread::sleep(std::time::Duration::from_millis(250));
     }
 
+    // Drop last sender and join receiver thread
+    drop(tx);
+    receiver.join().unwrap();
+
+    info!("Shutdown");
+
+    // Exit programm
     process::exit(0);
 }
 
 /// Start receiver for incoming spots.
 /// The incoming data is processed according to the application configuration.
-fn start_receiver(config: configuration::Configuration, rx: Receiver<Spot>) {
+///
+/// ## Arguments
+///
+/// * `config`: Application configuration
+/// * `rx`: Receiver of parsed spots
+///
+/// ## Result
+///
+/// * `Ok(JoinHandle<()>)`: Returning the thread handle in case the receiver started successfully.
+/// * `Err(std::io::Error)`: Returning the error in case the initialization of the reciever failed.
+fn start_receiver(
+    config: configuration::Configuration,
+    rx: Receiver<Spot>,
+) -> Result<JoinHandle<()>, std::io::Error> {
+    let mut write: Option<BufWriter<File>> = None;
+    if config.output.file {
+        write = Some(BufWriter::with_capacity(
+            1024,
+            File::create(Path::new(&config.output.filename))?,
+        ));
+    }
+
     // Handle incoming spots
-    thread::spawn(move || {
-        debug!("Receiving thread started");
-
-        let mut write: Option<BufWriter<File>> = None;
-        if config.output.file {
-            write = Some(BufWriter::with_capacity(
-                1024,
-                File::create(Path::new(&config.output.filename)).unwrap(),
-            ));
-        }
-
-        while let Ok(spot) = rx.recv() {
-            if config.output.console {
-                println!("{}", spot.to_json());
+    let thd = thread::Builder::new()
+        .name("receiver".into())
+        .spawn(move || {
+            while let Ok(spot) = rx.recv() {
+                if config.output.console {
+                    println!("{}", spot.to_json());
+                }
+                if config.output.file {
+                    writeln!(write.as_mut().unwrap(), "{}", spot.to_json())
+                        .expect("Failed to write data to file");
+                }
             }
-            if config.output.file {
-                writeln!(write.as_mut().unwrap(), "{}", spot.to_json()).unwrap();
-            }
-        }
 
-        debug!("Receiving thread finished");
-    });
+            warn!("Lost connection to senders, stop waiting for received spots");
+        })
+        .unwrap();
+
+    Ok(thd)
 }
 
 /// (Re-)Connect listener to remote server.

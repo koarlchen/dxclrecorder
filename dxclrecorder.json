@@ -16,5 +16,15 @@
         "console": true,
         "file": false,
         "filepath": "./"
+    },
+    "filter": {
+        "type": {
+            "dx": false,
+            "wx": true,
+            "wwv": true,
+            "wcy": true,
+            "toall": true,
+            "tolocal": true
+        }
     }
 }

@@ -8,6 +8,7 @@ pub struct Configuration {
     pub connection: Connection,
     pub logging: Logging,
     pub output: Output,
+    pub filter: Filter,
 }
 
 #[derive(Serialize, Deserialize, Clone)]
@@ -30,6 +31,21 @@ pub struct Logging {
     pub console: bool,
     pub file: bool,
     pub filepath: String,
+}
+
+#[derive(Serialize, Deserialize, Clone)]
+pub struct Filter {
+    pub r#type: Type,
+}
+
+#[derive(Serialize, Deserialize, Clone)]
+pub struct Type {
+    pub dx: bool,
+    pub wx: bool,
+    pub wwv: bool,
+    pub wcy: bool,
+    pub toall: bool,
+    pub tolocal: bool,
 }
 
 /// Parse configuration

@@ -158,12 +158,15 @@ fn start_receiver(
         .name("receiver".into())
         .spawn(move || {
             while let Ok(spot) = rx.recv() {
-                if config.output.console {
-                    println!("{}", spot.to_json());
-                }
-                if config.output.file {
-                    writeln!(write.as_mut().unwrap(), "{}", spot.to_json())
-                        .expect("Failed to write data to file");
+                if match_filter(&spot, &config) {
+                    let entry = spot.to_json();
+                    if config.output.console {
+                        println!("{}", entry);
+                    }
+                    if config.output.file {
+                        writeln!(write.as_mut().unwrap(), "{}", entry)
+                            .expect("Failed to write data to file");
+                    }
                 }
             }
 
@@ -172,6 +175,28 @@ fn start_receiver(
         .unwrap();
 
     Ok(thd)
+}
+
+/// Match spot against filter rules.
+///
+/// ## Arguments
+///
+/// * `spot`: Spot
+/// * `config`: Application Configuration
+///
+/// ## Result
+///
+/// True if the spot matches the filter, false if at least one filter critera does not match.
+fn match_filter(spot: &dxcllistener::Spot, config: &configuration::Configuration) -> bool {
+    match spot {
+        dxcllistener::Spot::DX(_) if config.filter.r#type.dx => true,
+        dxcllistener::Spot::WX(_) if config.filter.r#type.wx => true,
+        dxcllistener::Spot::WWV(_) if config.filter.r#type.wwv => true,
+        dxcllistener::Spot::WCY(_) if config.filter.r#type.wcy => true,
+        dxcllistener::Spot::ToAll(_) if config.filter.r#type.toall => true,
+        dxcllistener::Spot::ToLocal(_) if config.filter.r#type.tolocal => true,
+        _ => false,
+    }
 }
 
 /// (Re-)Connect listener to remote server.

@@ -19,58 +19,12 @@ use std::thread::{self, JoinHandle};
 
 mod configuration;
 
-/// Parse connection string from configuration
-fn parse_constring(raw: &str) -> Option<Listener> {
-    lazy_static! {
-        static ref RE_CONSTR: Regex =
-            Regex::new(r#"^(?P<user>.+)@(?P<host>.+):(?P<port>\d+)$"#).unwrap();
-    }
-
-    if let Some(cap) = RE_CONSTR.captures(raw) {
-        let user = cap.name("user").unwrap().as_str();
-        let host = cap.name("host").unwrap().as_str();
-        let port = cap.name("port").unwrap().as_str().parse::<u16>();
-
-        if let Ok(p) = port {
-            return Some(Listener::new(host.into(), p, user.into()));
-        }
-    }
-
-    None
-}
-
-/// Initialize logging
-fn init_logging(config: &configuration::Configuration) {
-    let log_config = ConfigBuilder::new()
-        .set_time_format_custom(format_description!(
-            "[day].[month].[year] [hour]:[minute]:[second]"
-        ))
-        .build();
-
-    let mut loggers: Vec<Box<dyn SharedLogger>> = vec![];
-
-    if config.logging.console {
-        loggers.push(TermLogger::new(
-            LevelFilter::Info,
-            log_config.clone(),
-            TerminalMode::Mixed,
-            ColorChoice::Auto,
-        ))
-    }
-
-    if config.logging.file {
-        loggers.push(WriteLogger::new(
-            LevelFilter::Info,
-            log_config,
-            File::create(Path::new(&config.logging.filepath).join("dxclrecorder.log"))
-                .expect("Failed to create log file"),
-        ))
-    }
-
-    CombinedLogger::init(loggers).unwrap();
-}
-
 fn main() {
+    process::exit(app())
+}
+
+/// Application method.
+fn app() -> i32 {
     // Read json configuration
     let config = configuration::parse_config(Path::new("dxclrecorder.json"))
         .expect("Failed to read configuration");
@@ -87,7 +41,7 @@ fn main() {
             }
             None => {
                 error!("Found invalid connection string: {}", constring);
-                process::exit(1);
+                return 1;
             }
         }
     }
@@ -100,7 +54,7 @@ fn main() {
         Ok(rcv) => rcv,
         Err(err) => {
             error!("Failed to start receiver ({})", err);
-            process::exit(1);
+            return 1;
         }
     };
 
@@ -172,7 +126,7 @@ fn main() {
     info!("Shutdown");
 
     // Exit programm
-    process::exit(0);
+    0
 }
 
 /// Start receiver for incoming spots.
@@ -253,5 +207,66 @@ fn connect_listener(
 
                 std::thread::sleep(std::time::Duration::from_secs(config.connection.backoff));
             }
-        }).unwrap();
+        })
+        .unwrap();
+}
+
+/// Parse connection string from configuration.
+///
+/// ## Arguments
+/// * `raw`: Raw connection string in the format call@host:port
+///
+/// ## Result
+/// If the format of the connection string is valid a new `Listener` is returned.
+fn parse_constring(raw: &str) -> Option<Listener> {
+    lazy_static! {
+        static ref RE_CONSTR: Regex =
+            Regex::new(r#"^(?P<user>.+)@(?P<host>.+):(?P<port>\d+)$"#).unwrap();
+    }
+
+    if let Some(cap) = RE_CONSTR.captures(raw) {
+        let user = cap.name("user").unwrap().as_str();
+        let host = cap.name("host").unwrap().as_str();
+        let port = cap.name("port").unwrap().as_str().parse::<u16>();
+
+        if let Ok(p) = port {
+            return Some(Listener::new(host.into(), p, user.into()));
+        }
+    }
+
+    None
+}
+
+/// Initialize logging setup.
+///
+/// ## Arguments
+/// * `config`: Application configuration
+fn init_logging(config: &configuration::Configuration) {
+    let log_config = ConfigBuilder::new()
+        .set_time_format_custom(format_description!(
+            "[day].[month].[year] [hour]:[minute]:[second]"
+        ))
+        .build();
+
+    let mut loggers: Vec<Box<dyn SharedLogger>> = vec![];
+
+    if config.logging.console {
+        loggers.push(TermLogger::new(
+            LevelFilter::Info,
+            log_config.clone(),
+            TerminalMode::Mixed,
+            ColorChoice::Auto,
+        ))
+    }
+
+    if config.logging.file {
+        loggers.push(WriteLogger::new(
+            LevelFilter::Info,
+            log_config,
+            File::create(Path::new(&config.logging.filepath).join("dxclrecorder.log"))
+                .expect("Failed to create log file"),
+        ))
+    }
+
+    CombinedLogger::init(loggers).unwrap();
 }

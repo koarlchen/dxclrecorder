@@ -30,7 +30,7 @@ pub struct Output {
 pub struct Logging {
     pub console: bool,
     pub file: bool,
-    pub filepath: String,
+    pub filename: String,
 }
 
 #[derive(Serialize, Deserialize, Clone)]

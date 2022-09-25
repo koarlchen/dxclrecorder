@@ -288,8 +288,7 @@ fn init_logging(config: &configuration::Configuration) {
         loggers.push(WriteLogger::new(
             LevelFilter::Info,
             log_config,
-            File::create(Path::new(&config.logging.filepath).join("dxclrecorder.log"))
-                .expect("Failed to create log file"),
+            File::create(Path::new(&config.logging.filename)).expect("Failed to create log file"),
         ))
     }
 

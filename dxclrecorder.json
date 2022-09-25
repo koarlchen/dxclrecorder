@@ -15,7 +15,7 @@
     "logging": {
         "console": true,
         "file": false,
-        "filepath": "./"
+        "filename": "./recorder.log"
     },
     "filter": {
         "type": {

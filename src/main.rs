@@ -221,29 +221,37 @@ fn start_receiver(
 }
 
 /// (Re-)Connect listener to remote server.
+///
+/// ## Arguments
+/// * `listener`: Listener to reconnect to server
+/// * `listeners`: List of active listeners
+/// * `config`: Application configuration
+/// * `tx`: Sender channel for incoming spots
 fn connect_listener(
     mut listener: Listener,
     listeners: Arc<Mutex<Vec<Listener>>>,
     config: configuration::Configuration,
     tx: mpsc::Sender<dxcllistener::Spot>,
 ) {
-    thread::spawn(move || {
-        let mut recon_ctr = config.connection.retries;
-        loop {
-            info!("Try to connect listener {}", listener);
-            if listener.listen(tx.clone()).is_ok() {
-                info!("Listener {} connected", listener);
-                listeners.lock().unwrap().push(listener);
-                break;
-            }
+    thread::Builder::new()
+        .name(format!("connect {}", listener))
+        .spawn(move || {
+            let mut recon_ctr = config.connection.retries;
+            loop {
+                info!("Try to connect listener {}", listener);
+                if listener.listen(tx.clone()).is_ok() {
+                    info!("Listener {} connected", listener);
+                    listeners.lock().unwrap().push(listener);
+                    break;
+                }
 
-            recon_ctr -= 1;
-            if recon_ctr == 0 {
-                error!("Failed to connect listener {}", listener);
-                break;
-            }
+                recon_ctr -= 1;
+                if recon_ctr == 0 {
+                    error!("Failed to connect listener {}", listener);
+                    break;
+                }
 
-            std::thread::sleep(std::time::Duration::from_secs(config.connection.backoff));
-        }
-    });
+                std::thread::sleep(std::time::Duration::from_secs(config.connection.backoff));
+            }
+        }).unwrap();
 }

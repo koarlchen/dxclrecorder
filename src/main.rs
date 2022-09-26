@@ -124,7 +124,7 @@ fn app() -> i32 {
             true
         });
 
-        std::thread::sleep(std::time::Duration::from_millis(250));
+        thread::sleep(Duration::from_millis(250));
     }
 
     // Drop last sender and join receiver thread
@@ -251,7 +251,7 @@ fn connect_listener(
                     }
                 }
 
-                std::thread::sleep(Duration::from_millis(500));
+                thread::sleep(Duration::from_millis(500));
             }
         })
         .unwrap();

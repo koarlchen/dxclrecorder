@@ -214,7 +214,7 @@ fn match_filter(spot: &dxcllistener::Spot, config: &configuration::Configuration
                 error!("Failed to get band for freq {}", dx.freq);
                 false
             }
-        },
+        }
         _ => true,
     };
 
@@ -251,7 +251,7 @@ fn connect_listener(
                     now = SystemTime::now();
 
                     info!("Try to connect listener {}", listener);
-                    if listener.listen(tx.clone()).is_ok() {
+                    if listener.listen(tx.clone(), Duration::from_secs(1)).is_ok() {
                         info!("Listener {} connected", listener);
                         listeners.lock().unwrap().push(listener);
                         break;

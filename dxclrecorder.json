@@ -19,7 +19,7 @@
     },
     "filter": {
         "type": {
-            "dx": false,
+            "dx": true,
             "wx": true,
             "wwv": true,
             "wcy": true,

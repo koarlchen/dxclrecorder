@@ -16,6 +16,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::Receiver;
 use std::sync::{mpsc, Arc, Mutex};
 use std::thread::{self, JoinHandle};
+use std::time::{Duration, SystemTime};
 
 mod configuration;
 
@@ -76,6 +77,7 @@ fn app() -> i32 {
             listeners.clone(),
             config.clone(),
             tx.clone(),
+            signal.clone(),
         );
         false
     });
@@ -108,7 +110,13 @@ fn app() -> i32 {
 
                 if config.connection.reconnect {
                     let dead = Listener::new(l.host.clone(), l.port, l.callsign.clone());
-                    connect_listener(dead, listeners.clone(), config.clone(), tx.clone());
+                    connect_listener(
+                        dead,
+                        listeners.clone(),
+                        config.clone(),
+                        tx.clone(),
+                        signal.clone(),
+                    );
                 }
 
                 return false;
@@ -202,35 +210,48 @@ fn match_filter(spot: &dxcllistener::Spot, config: &configuration::Configuration
 /// (Re-)Connect listener to remote server.
 ///
 /// ## Arguments
+///
 /// * `listener`: Listener to reconnect to server
 /// * `listeners`: List of active listeners
 /// * `config`: Application configuration
 /// * `tx`: Sender channel for incoming spots
+/// * `signal`: Signal for application shutdown request
 fn connect_listener(
     mut listener: Listener,
     listeners: Arc<Mutex<Vec<Listener>>>,
     config: configuration::Configuration,
     tx: mpsc::Sender<dxcllistener::Spot>,
+    signal: Arc<AtomicBool>,
 ) {
     thread::Builder::new()
         .name(format!("connect {}", listener))
         .spawn(move || {
             let mut recon_ctr = config.connection.retries;
-            loop {
-                info!("Try to connect listener {}", listener);
-                if listener.listen(tx.clone()).is_ok() {
-                    info!("Listener {} connected", listener);
-                    listeners.lock().unwrap().push(listener);
-                    break;
+
+            let mut now = SystemTime::now();
+            now -= Duration::from_secs(config.connection.backoff - 1);
+
+            while signal.load(Ordering::Relaxed) {
+                // Try to reconnect only after configured backoff time
+                if now.elapsed().unwrap() >= Duration::from_secs(config.connection.backoff) {
+                    now = SystemTime::now();
+
+                    info!("Try to connect listener {}", listener);
+                    if listener.listen(tx.clone()).is_ok() {
+                        info!("Listener {} connected", listener);
+                        listeners.lock().unwrap().push(listener);
+                        break;
+                    }
+                    info!("Attempt to connect failed for {}", listener);
+
+                    recon_ctr -= 1;
+                    if recon_ctr == 0 {
+                        error!("Failed to connect listener {}", listener);
+                        break;
+                    }
                 }
 
-                recon_ctr -= 1;
-                if recon_ctr == 0 {
-                    error!("Failed to connect listener {}", listener);
-                    break;
-                }
-
-                std::thread::sleep(std::time::Duration::from_secs(config.connection.backoff));
+                std::thread::sleep(Duration::from_millis(500));
             }
         })
         .unwrap();

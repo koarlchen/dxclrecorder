@@ -196,7 +196,7 @@ fn start_receiver(
 ///
 /// True if the spot matches the filter, false if at least one filter critera does not match.
 fn match_filter(spot: &dxcllistener::Spot, config: &configuration::Configuration) -> bool {
-    match spot {
+    let r#type = match spot {
         dxcllistener::Spot::DX(_) if config.filter.r#type.dx => true,
         dxcllistener::Spot::WX(_) if config.filter.r#type.wx => true,
         dxcllistener::Spot::WWV(_) if config.filter.r#type.wwv => true,
@@ -204,7 +204,21 @@ fn match_filter(spot: &dxcllistener::Spot, config: &configuration::Configuration
         dxcllistener::Spot::ToAll(_) if config.filter.r#type.toall => true,
         dxcllistener::Spot::ToLocal(_) if config.filter.r#type.tolocal => true,
         _ => false,
-    }
+    };
+
+    let band = match spot {
+        dxcllistener::Spot::DX(dx) => {
+            if let Ok(band) = hambands::search::get_band_for_frequency(dx.freq) {
+                config.filter.band.contains(&band.name.into())
+            } else {
+                error!("Failed to get band for freq {}", dx.freq);
+                false
+            }
+        },
+        _ => true,
+    };
+
+    r#type && band
 }
 
 /// (Re-)Connect listener to remote server.

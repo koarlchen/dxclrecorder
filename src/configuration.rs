@@ -36,6 +36,7 @@ pub struct Logging {
 #[derive(Serialize, Deserialize, Clone)]
 pub struct Filter {
     pub r#type: Type,
+    pub band: Vec<String>,
 }
 
 #[derive(Serialize, Deserialize, Clone)]

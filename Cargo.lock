@@ -47,8 +47,9 @@ dependencies = [
 
 [[package]]
 name = "dxcllistener"
-version = "0.3.0"
-source = "git+https://github.com/koarlchen/dxcllistener.git#9affb549f65a9f15be1eab56f72058d9ddfd829d"
+version = "0.4.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "84875e05a7a5ce95c96a3ea4d47437351894d1d5161c9e2b238201edc402e87c"
 dependencies = [
  "thiserror",
  "tokio",

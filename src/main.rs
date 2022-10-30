@@ -8,6 +8,7 @@ use simplelog::{
     format_description, ColorChoice, CombinedLogger, ConfigBuilder, LevelFilter, SharedLogger,
     TermLogger, TerminalMode, WriteLogger,
 };
+use std::collections::VecDeque;
 use std::fs::File;
 use std::io::{BufWriter, Write};
 use std::path::Path;
@@ -31,11 +32,11 @@ async fn main() {
     init_logging(&config);
 
     // Parse connection strings
-    let listeners: Arc<Mutex<Vec<Listener>>> = Arc::new(Mutex::new(Vec::new()));
+    let listeners: Arc<Mutex<VecDeque<Listener>>> = Arc::new(Mutex::new(VecDeque::new()));
     for constring in config.connection.constrings.iter() {
         match parse_constring(constring) {
             Some(info) => {
-                listeners.lock().unwrap().push(info);
+                listeners.lock().unwrap().push_back(info);
             }
             None => {
                 error!("Found invalid connection string: {}", constring);
@@ -96,7 +97,7 @@ async fn main() {
         let mut dead_listener: Option<Listener> = None;
         let mut lis_guard = listeners.lock().unwrap();
         if let Some(pos) = lis_guard.iter_mut().position(|x| !x.is_running()) {
-            dead_listener = Some(lis_guard.remove(pos));
+            dead_listener = lis_guard.remove(pos);
         }
         // NOTE: clippy does not recognize explicit drop of mutex guard (causes clippy::await_holding_lock)
         // See also here: https://github.com/rust-lang/rust-clippy/issues/6446
@@ -139,8 +140,10 @@ async fn main() {
     }
 
     // Join all stopped listeners
-    for l in listeners.lock().unwrap().iter_mut() {
-        l.join().await.unwrap(); // FIXME: causes clippy warning because usage of await within locked mutex context
+    while let Some(mut lis) = listeners.lock().unwrap().pop_front() {
+        // TODO: clippy warns about a present mutex guard from the line above in combination with calling await.
+        // The mutex guard should already be dropped when working with the removed element (remove happens by pop_front)
+        lis.join().await.unwrap();
     }
 
     // Drop last sender and join receiver thread
@@ -245,7 +248,7 @@ fn match_filter(spot: &dxclparser::Spot, config: &configuration::Configuration) 
 /// * `signal`: Signal for application shutdown request
 fn connect_listener(
     mut listener: Listener,
-    listeners: Arc<Mutex<Vec<Listener>>>,
+    listeners: Arc<Mutex<VecDeque<Listener>>>,
     active_listeners: Arc<AtomicI32>,
     config: configuration::Configuration,
     tx: mpsc::UnboundedSender<String>,
@@ -268,7 +271,7 @@ fn connect_listener(
                 res = listener.listen(tx.clone(), time::Duration::from_secs(1)) => {
                     if res.is_ok() {
                         info!("Listener {} connected", listener);
-                        listeners.lock().unwrap().push(listener);
+                        listeners.lock().unwrap().push_back(listener);
                         break;
                     }
                     info!("Attempt to connect failed for {}", listener);

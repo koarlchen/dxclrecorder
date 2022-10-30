@@ -1,7 +1,7 @@
 #[macro_use]
 extern crate log;
 
-use dxcllistener::{Listener, Spot};
+use dxcllistener::Listener;
 use lazy_static::lazy_static;
 use regex::Regex;
 use simplelog::{
@@ -11,21 +11,18 @@ use simplelog::{
 use std::fs::File;
 use std::io::{BufWriter, Write};
 use std::path::Path;
-use std::process;
-use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::mpsc::Receiver;
-use std::sync::{mpsc, Arc, Mutex};
-use std::thread::{self, JoinHandle};
-use std::time::{Duration, SystemTime};
+use std::sync::atomic::{AtomicI32, Ordering};
+use std::sync::{Arc, Mutex};
+use tokio::signal;
+use tokio::sync::{broadcast, mpsc};
+use tokio::task;
+use tokio::time;
 
 mod configuration;
 
-fn main() {
-    process::exit(app())
-}
-
 /// Application method.
-fn app() -> i32 {
+#[tokio::main]
+async fn main() {
     // Read json configuration
     let config = configuration::parse_config(Path::new("dxclrecorder.json"))
         .expect("Failed to read configuration");
@@ -42,117 +39,133 @@ fn app() -> i32 {
             }
             None => {
                 error!("Found invalid connection string: {}", constring);
-                return 1;
+                return;
             }
         }
     }
 
-    // Communication channel between listeners and receiver
-    let (tx, rx) = mpsc::channel::<dxcllistener::Spot>();
+    // Communication channel between listeners and receiver to forward received lines
+    let (tx, rx) = mpsc::unbounded_channel::<String>();
 
     // Start receiver for incoming spots
     let receiver = match start_receiver(config.clone(), rx) {
         Ok(rcv) => rcv,
         Err(err) => {
             error!("Failed to start receiver ({})", err);
-            return 1;
+            return;
         }
     };
 
-    // Stop signal
-    let signal = Arc::new(AtomicBool::new(true));
+    // Shutdown signal shared across all tasks
+    // In case the shutdown was requested, an empty message is sent to all receivers.
+    // Since this is for single-usage-only a buffer size of 1 for the channel is sufficient.
+    let (shtdwn_tx, mut shtdwn_rx) = broadcast::channel::<()>(1);
 
-    // Register ctrl-c handler to stop listeners
-    let sig = signal.clone();
-    ctrlc::set_handler(move || {
-        info!("Requested shutdown");
-        sig.store(false, Ordering::Relaxed);
-    })
-    .expect("Failed to listen on Ctrl-C");
+    // Register ctrl-c handler to stop tasks
+    // If the signal was caught, an empty message is sent through the shutdown channel to inform all tasks about the shutdown request.
+    let tmp_tx = shtdwn_tx.clone();
+    task::spawn(async move {
+        signal::ctrl_c().await.expect("Failed to listen for ctrl-c");
+        tmp_tx.send(()).unwrap();
+    });
 
-    // Start all listeners and remove from list afterwards
+    // Refelects the number of present listeners.
+    // Counter will be incremented before first connection attempt for each listener.
+    // If the listener could not be connected to the server, even after several retries,
+    // it will be removed and so the counter will be decremented.
+    let active_listeners: Arc<AtomicI32> = Arc::new(AtomicI32::new(0));
+
+    // Start all listeners and remove from them from the list afterwards
+    // Each listener will be added again after its successful connect attempt.
     listeners.lock().unwrap().retain_mut(|l| {
+        active_listeners.fetch_add(1, Ordering::Relaxed);
         connect_listener(
             Listener::new(l.host.clone(), l.port, l.callsign.clone()),
             listeners.clone(),
+            active_listeners.clone(),
             config.clone(),
             tx.clone(),
-            signal.clone(),
+            shtdwn_tx.subscribe(),
         );
         false
     });
 
     // Main process loop
-    loop {
-        // Check for application stop request
-        if !signal.load(Ordering::Relaxed) {
-            let mut lis = listeners.lock().unwrap();
+    while active_listeners.load(Ordering::Relaxed) > 0 {
+        // Check if a listener unexpectedly stopped running
+        let mut dead_listener: Option<Listener> = None;
+        let mut lis_guard = listeners.lock().unwrap();
+        if let Some(pos) = lis_guard.iter_mut().position(|x| !x.is_running()) {
+            dead_listener = Some(lis_guard.remove(pos));
+        }
+        // NOTE: clippy does not recognize explicit drop of mutex guard (causes clippy::await_holding_lock)
+        // See also here: https://github.com/rust-lang/rust-clippy/issues/6446
+        drop(lis_guard);
 
-            debug!("Request stop of listeners");
-            for l in lis.iter_mut() {
-                l.request_stop();
+        // Handle a possible found dead listener
+        if let Some(mut dead) = dead_listener {
+            let res = dead.join().await.unwrap_err();
+
+            println!(
+                "Listener {}@{}:{} stopped unexpectedly ({})",
+                dead.callsign, dead.host, dead.port, res
+            );
+
+            if config.connection.reconnect {
+                connect_listener(
+                    dead,
+                    listeners.clone(),
+                    active_listeners.clone(),
+                    config.clone(),
+                    tx.clone(),
+                    shtdwn_tx.subscribe(),
+                )
             }
-            debug!("Join listeners");
-            for l in lis.iter_mut() {
-                l.join().unwrap();
-            }
-            break;
         }
 
-        // Check for unexpectedly stopped listeners and remove them from the list of active listeners
-        listeners.lock().unwrap().retain_mut(|l| {
-            if !l.is_running() {
-                let res = l.join().unwrap_err();
-                warn!(
-                    "Listener {}@{}:{} stopped unexpectedly ({})",
-                    l.callsign, l.host, l.port, res
-                );
-
-                if config.connection.reconnect {
-                    let dead = Listener::new(l.host.clone(), l.port, l.callsign.clone());
-                    connect_listener(
-                        dead,
-                        listeners.clone(),
-                        config.clone(),
-                        tx.clone(),
-                        signal.clone(),
-                    );
-                }
-
-                return false;
+        // Wait before check of stopped listeners.
+        // In case of a shutdown request break loop to shutdown application
+        tokio::select! {
+            _ = time::sleep(time::Duration::from_millis(250)) => (),
+            _ = shtdwn_rx.recv() => {
+                break;
             }
-            true
-        });
+        }
+    }
 
-        thread::sleep(Duration::from_millis(250));
+    // Request stop of all listeners
+    for l in listeners.lock().unwrap().iter_mut() {
+        l.request_stop().unwrap();
+    }
+
+    // Join all stopped listeners
+    for l in listeners.lock().unwrap().iter_mut() {
+        l.join().await.unwrap(); // FIXME: causes clippy warning because usage of await within locked mutex context
     }
 
     // Drop last sender and join receiver thread
     drop(tx);
-    receiver.join().unwrap();
+    receiver.await.unwrap();
 
     info!("Shutdown");
-
-    // Exit programm
-    0
 }
 
 /// Start receiver for incoming spots.
 /// The incoming data is processed according to the application configuration.
 ///
-/// ## Arguments
+/// # Arguments
 ///
 /// * `config`: Application configuration
 /// * `rx`: Receiver of parsed spots
 ///
-/// ## Result
+/// # Result
 ///
 /// * `Ok(JoinHandle<()>)`: Returning the thread handle in case the receiver started successfully.
 /// * `Err(std::io::Error)`: Returning the error in case the initialization of the reciever failed.
 fn start_receiver(
     config: configuration::Configuration,
-    rx: Receiver<Spot>,
-) -> Result<JoinHandle<()>, std::io::Error> {
+    mut rx: mpsc::UnboundedReceiver<String>,
+) -> Result<task::JoinHandle<()>, std::io::Error> {
     let mut write: Option<BufWriter<File>> = None;
     if config.output.file {
         write = Some(BufWriter::with_capacity(
@@ -161,11 +174,9 @@ fn start_receiver(
         ));
     }
 
-    // Handle incoming spots
-    let thd = thread::Builder::new()
-        .name("receiver".into())
-        .spawn(move || {
-            while let Ok(spot) = rx.recv() {
+    let tsk = task::spawn(async move {
+        while let Some(line) = rx.recv().await {
+            if let Ok(spot) = dxclparser::parse(&line) {
                 if match_filter(&spot, &config) {
                     let entry = spot.to_json();
                     if config.output.console {
@@ -177,37 +188,39 @@ fn start_receiver(
                     }
                 }
             }
+        }
 
-            warn!("Lost connection to senders, stop waiting for received spots");
-        })
-        .unwrap();
+        warn!("Lost connection to senders, stop waiting for received spots");
+    });
 
-    Ok(thd)
+    Ok(tsk)
 }
 
 /// Match spot against filter rules.
 ///
-/// ## Arguments
+/// # Arguments
 ///
 /// * `spot`: Spot
 /// * `config`: Application Configuration
 ///
-/// ## Result
+/// # Result
 ///
 /// True if the spot matches the filter, false if at least one filter critera does not match.
-fn match_filter(spot: &dxcllistener::Spot, config: &configuration::Configuration) -> bool {
+fn match_filter(spot: &dxclparser::Spot, config: &configuration::Configuration) -> bool {
+    // Filter for type
     let r#type = match spot {
-        dxcllistener::Spot::DX(_) if config.filter.r#type.dx => true,
-        dxcllistener::Spot::WX(_) if config.filter.r#type.wx => true,
-        dxcllistener::Spot::WWV(_) if config.filter.r#type.wwv => true,
-        dxcllistener::Spot::WCY(_) if config.filter.r#type.wcy => true,
-        dxcllistener::Spot::ToAll(_) if config.filter.r#type.toall => true,
-        dxcllistener::Spot::ToLocal(_) if config.filter.r#type.tolocal => true,
+        dxclparser::Spot::DX(_) if config.filter.r#type.dx => true,
+        dxclparser::Spot::WX(_) if config.filter.r#type.wx => true,
+        dxclparser::Spot::WWV(_) if config.filter.r#type.wwv => true,
+        dxclparser::Spot::WCY(_) if config.filter.r#type.wcy => true,
+        dxclparser::Spot::ToAll(_) if config.filter.r#type.toall => true,
+        dxclparser::Spot::ToLocal(_) if config.filter.r#type.tolocal => true,
         _ => false,
     };
 
+    // Filter for band
     let band = match spot {
-        dxcllistener::Spot::DX(dx) => {
+        dxclparser::Spot::DX(dx) => {
             if let Ok(band) = hambands::search::get_band_for_frequency(dx.freq) {
                 config.filter.band.contains(&band.name.into())
             } else {
@@ -223,7 +236,7 @@ fn match_filter(spot: &dxcllistener::Spot, config: &configuration::Configuration
 
 /// (Re-)Connect listener to remote server.
 ///
-/// ## Arguments
+/// # Arguments
 ///
 /// * `listener`: Listener to reconnect to server
 /// * `listeners`: List of active listeners
@@ -233,50 +246,60 @@ fn match_filter(spot: &dxcllistener::Spot, config: &configuration::Configuration
 fn connect_listener(
     mut listener: Listener,
     listeners: Arc<Mutex<Vec<Listener>>>,
+    active_listeners: Arc<AtomicI32>,
     config: configuration::Configuration,
-    tx: mpsc::Sender<dxcllistener::Spot>,
-    signal: Arc<AtomicBool>,
+    tx: mpsc::UnboundedSender<String>,
+    mut shtdwn: broadcast::Receiver<()>,
 ) {
-    thread::Builder::new()
-        .name(format!("connect {}", listener))
-        .spawn(move || {
-            let mut recon_ctr = config.connection.retries;
+    // Spawn new task to connect listener to server
+    task::spawn(async move {
+        let mut recon_ctr = config.connection.retries;
 
-            let mut now = SystemTime::now();
-            now -= Duration::from_secs(config.connection.backoff - 1);
+        loop {
+            let sleep_instant = time::Instant::now()
+                .checked_add(time::Duration::from_secs(config.connection.backoff))
+                .unwrap();
 
-            while signal.load(Ordering::Relaxed) {
-                // Try to reconnect only after configured backoff time
-                if now.elapsed().unwrap() >= Duration::from_secs(config.connection.backoff) {
-                    now = SystemTime::now();
-
-                    info!("Try to connect listener {}", listener);
-                    if listener.listen(tx.clone(), Duration::from_secs(1)).is_ok() {
+            info!("Try to connect listener {}", listener);
+            tokio::select! {
+                _ = shtdwn.recv() => {
+                    break;
+                },
+                res = listener.listen(tx.clone(), time::Duration::from_secs(1)) => {
+                    if res.is_ok() {
                         info!("Listener {} connected", listener);
                         listeners.lock().unwrap().push(listener);
                         break;
                     }
                     info!("Attempt to connect failed for {}", listener);
-
-                    recon_ctr -= 1;
-                    if recon_ctr == 0 {
-                        error!("Failed to connect listener {}", listener);
-                        break;
-                    }
                 }
-
-                thread::sleep(Duration::from_millis(500));
             }
-        })
-        .unwrap();
+
+            recon_ctr -= 1;
+            if recon_ctr == 0 {
+                error!("Failed to connect listener {}", listener);
+                active_listeners.fetch_sub(1, Ordering::Relaxed);
+                break;
+            }
+
+            tokio::select! {
+                _ = shtdwn.recv() => {
+                    break;
+                },
+                _ = time::sleep_until(sleep_instant) => {}
+            }
+        }
+    });
 }
 
 /// Parse connection string from configuration.
 ///
-/// ## Arguments
+/// # Arguments
+///
 /// * `raw`: Raw connection string in the format call@host:port
 ///
-/// ## Result
+/// # Result
+///
 /// If the format of the connection string is valid a new `Listener` is returned.
 fn parse_constring(raw: &str) -> Option<Listener> {
     lazy_static! {
@@ -299,7 +322,8 @@ fn parse_constring(raw: &str) -> Option<Listener> {
 
 /// Initialize logging setup.
 ///
-/// ## Arguments
+/// # Arguments
+///
 /// * `config`: Application configuration
 fn init_logging(config: &configuration::Configuration) {
     let log_config = ConfigBuilder::new()
@@ -312,7 +336,7 @@ fn init_logging(config: &configuration::Configuration) {
 
     if config.logging.console {
         loggers.push(TermLogger::new(
-            LevelFilter::Info,
+            LevelFilter::Debug,
             log_config.clone(),
             TerminalMode::Mixed,
             ColorChoice::Auto,

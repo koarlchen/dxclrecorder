@@ -8,7 +8,6 @@ edition = "2021"
 dxcllistener = "0.4.0"
 dxclparser = "1.0.1"
 hambands = "0.1.2"
-ctrlc = "3.2.3"
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 regex = "1.6.0"

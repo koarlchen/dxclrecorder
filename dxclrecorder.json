@@ -26,13 +26,14 @@
     "filter": {
         "type": {
             "dx": true,
-            "wx": true,
-            "wwv": true,
             "wcy": true,
-            "toall": true,
-            "tolocal": true
+            "wx": false,
+            "wwv": false,
+            "toall": false,
+            "tolocal": false
         },
         "band": [
+            "160m",
             "80m",
             "40m",
             "30m",
@@ -40,7 +41,8 @@
             "17m",
             "15m",
             "12m",
-            "10m"
+            "10m",
+            "6m"
         ]
     }
 }

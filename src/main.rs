@@ -50,8 +50,6 @@ async fn main() {
     // Communication channel between listeners and receiver to forward received lines
     let (tx, rx) = mpsc::unbounded_channel::<String>();
 
-    debug!("Start receiver");
-
     // Start receiver for incoming spots
     let receiver = match start_receiver(config.clone(), rx).await {
         Ok(rcv) => rcv,
@@ -80,8 +78,6 @@ async fn main() {
     // it will be removed and so the counter will be decremented.
     let active_listeners: Arc<AtomicI32> = Arc::new(AtomicI32::new(0));
 
-    debug!("Connect listeners");
-
     // Start all listeners and remove from them from the list afterwards
     // Each listener will be added again after its successful connect attempt.
     listeners.lock().unwrap().retain_mut(|l| {
@@ -96,8 +92,6 @@ async fn main() {
         );
         false
     });
-
-    debug!("Enter main loop");
 
     // Main process loop
     while active_listeners.load(Ordering::Relaxed) > 0 {

@@ -10,7 +10,6 @@ use simplelog::{
 };
 use std::collections::VecDeque;
 use std::fs::File;
-use std::io::{BufWriter, Write};
 use std::path::Path;
 use std::sync::atomic::{AtomicI32, Ordering};
 use std::sync::{Arc, Mutex};
@@ -20,6 +19,9 @@ use tokio::task;
 use tokio::time;
 
 mod configuration;
+mod filerotate;
+
+use filerotate::FileWriter;
 
 /// Application method.
 #[tokio::main]
@@ -48,8 +50,10 @@ async fn main() {
     // Communication channel between listeners and receiver to forward received lines
     let (tx, rx) = mpsc::unbounded_channel::<String>();
 
+    debug!("Start receiver");
+
     // Start receiver for incoming spots
-    let receiver = match start_receiver(config.clone(), rx) {
+    let receiver = match start_receiver(config.clone(), rx).await {
         Ok(rcv) => rcv,
         Err(err) => {
             error!("Failed to start receiver ({})", err);
@@ -76,6 +80,8 @@ async fn main() {
     // it will be removed and so the counter will be decremented.
     let active_listeners: Arc<AtomicI32> = Arc::new(AtomicI32::new(0));
 
+    debug!("Connect listeners");
+
     // Start all listeners and remove from them from the list afterwards
     // Each listener will be added again after its successful connect attempt.
     listeners.lock().unwrap().retain_mut(|l| {
@@ -90,6 +96,8 @@ async fn main() {
         );
         false
     });
+
+    debug!("Enter main loop");
 
     // Main process loop
     while active_listeners.load(Ordering::Relaxed) > 0 {
@@ -165,35 +173,60 @@ async fn main() {
 ///
 /// * `Ok(JoinHandle<()>)`: Returning the thread handle in case the receiver started successfully.
 /// * `Err(std::io::Error)`: Returning the error in case the initialization of the reciever failed.
-fn start_receiver(
+async fn start_receiver(
     config: configuration::Configuration,
     mut rx: mpsc::UnboundedReceiver<String>,
 ) -> Result<task::JoinHandle<()>, std::io::Error> {
-    let mut write: Option<BufWriter<File>> = None;
-    if config.output.file {
-        write = Some(BufWriter::with_capacity(
-            1024,
-            File::create(Path::new(&config.output.filename))?,
-        ));
+    // Create file writer if required
+    let mut writer: Option<FileWriter> = None;
+    if config.output.file.enabled {
+        writer = Some(
+            FileWriter::new(
+                Path::new(&config.output.file.filename).to_path_buf(),
+                false,
+                true,
+            )
+            .await?,
+        );
     }
 
+    // Spawn task to handle received data from server
     let tsk = task::spawn(async move {
+        // Wait for new data
         while let Some(line) = rx.recv().await {
+            // Try to parse spot
             if let Ok(spot) = dxclparser::parse(&line) {
+                // Check if the parsed spot does not match to any of the filters
                 if match_filter(&spot, &config) {
                     let entry = spot.to_json();
+
+                    // Write spot to console
                     if config.output.console {
                         println!("{}", entry);
                     }
-                    if config.output.file {
-                        writeln!(write.as_mut().unwrap(), "{}", entry)
+
+                    // Write spot to file
+                    if config.output.file.enabled {
+                        writer
+                            .as_mut()
+                            .unwrap()
+                            .write(&entry)
+                            .await
                             .expect("Failed to write data to file");
                     }
                 }
             }
         }
 
-        warn!("Lost connection to senders, stop waiting for received spots");
+        // Flush file before quitting
+        if config.output.file.enabled {
+            writer
+                .as_mut()
+                .unwrap()
+                .flush()
+                .await
+                .expect("Failed to flush writer");
+        }
     });
 
     Ok(tsk)
@@ -346,11 +379,12 @@ fn init_logging(config: &configuration::Configuration) {
         ))
     }
 
-    if config.logging.file {
+    if config.logging.file.enabled {
         loggers.push(WriteLogger::new(
             LevelFilter::Info,
             log_config,
-            File::create(Path::new(&config.logging.filename)).expect("Failed to create log file"),
+            File::create(Path::new(&config.logging.file.filename))
+                .expect("Failed to create log file"),
         ))
     }
 

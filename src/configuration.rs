@@ -22,14 +22,28 @@ pub struct Connection {
 #[derive(Serialize, Deserialize, Clone)]
 pub struct Output {
     pub console: bool,
-    pub file: bool,
+    #[serde(rename = "file")]
+    pub file: OutputFile,
+}
+
+#[derive(Serialize, Deserialize, Clone)]
+pub struct OutputFile {
+    pub enabled: bool,
+    pub date: bool,
+    pub rotate: bool,
     pub filename: String,
 }
 
 #[derive(Serialize, Deserialize, Clone)]
 pub struct Logging {
     pub console: bool,
-    pub file: bool,
+    #[serde(rename = "file")]
+    pub file: LoggingFile,
+}
+
+#[derive(Serialize, Deserialize, Clone)]
+pub struct LoggingFile {
+    pub enabled: bool,
     pub filename: String,
 }
 
@@ -50,6 +64,14 @@ pub struct Type {
 }
 
 /// Parse configuration
+///
+/// # Arguments
+///
+/// * `path`: Path to configuration to read
+///
+/// # Result
+///
+/// Returns the parsed configuration or propagates the occurred error.
 pub fn parse_config(path: &Path) -> Result<Configuration, io::Error> {
     let file = File::open(path)?;
     let reader = BufReader::new(file);

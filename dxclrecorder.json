@@ -8,14 +8,20 @@
         "backoff": 30
     },
     "output": {
-        "console": true,
-        "file": false,
-        "filename": "./data.json"
+        "console": false,
+        "file": {
+            "enabled": true,
+            "date": true,
+            "rotate": true,
+            "filename": "./out/data.json"
+        }
     },
     "logging": {
         "console": true,
-        "file": false,
-        "filename": "./recorder.log"
+        "file": {
+            "enabled": false,
+            "filename": "./out/recorder.log"
+        }
     },
     "filter": {
         "type": {

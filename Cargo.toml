@@ -1,7 +1,13 @@
 [package]
 name = "dxclrecorder"
 version = "0.1.0"
+authors = ["Max <max@karl.wf>"]
 edition = "2021"
+license = "MPL-2.0"
+readme = "README.md"
+repository = "https://github.com/koarlchen/dxclrecorder.git"
+description = "A recorder for spots published by DX cluster servers"
+keywords = ["ham", "ham-radio", "dxcluster", "cluster"]
 
 
 [dependencies]

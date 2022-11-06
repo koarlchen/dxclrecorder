@@ -8,9 +8,9 @@
         "backoff": 30
     },
     "output": {
-        "console": false,
+        "console": true,
         "file": {
-            "enabled": true,
+            "enabled": false,
             "date": true,
             "rotate": true,
             "filename": "./out/data.json"

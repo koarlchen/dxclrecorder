@@ -5,6 +5,7 @@
 #[macro_use]
 extern crate log;
 
+use clap::Parser;
 use dxcllistener::Listener;
 use lazy_static::lazy_static;
 use regex::Regex;
@@ -27,12 +28,23 @@ mod filerotate;
 
 use filerotate::FileWriter;
 
+#[derive(Parser)]
+#[command(author, version, about, long_about = None)]
+struct CliArgs {
+    /// Sets the configuration file to use
+    #[arg(short, long, default_value = "dxclrecorder.json")]
+    config: String,
+}
+
 /// Application method.
 #[tokio::main]
 async fn main() {
+    // Parse commandline arguments
+    let args = CliArgs::parse();
+
     // Read json configuration
-    let config = configuration::parse_config(Path::new("dxclrecorder.json"))
-        .expect("Failed to read configuration");
+    let config =
+        configuration::parse_config(Path::new(&args.config)).expect("Failed to read configuration");
 
     // Initialize logging
     init_logging(&config);

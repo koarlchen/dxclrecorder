@@ -34,6 +34,10 @@ struct CliArgs {
     /// Sets the configuration file to use
     #[arg(short, long, default_value = "dxclrecorder.json")]
     config: String,
+
+    /// Enable verbose log output
+    #[arg(short, long, default_value = "false")]
+    verbose: bool,
 }
 
 /// Application method.
@@ -47,7 +51,7 @@ async fn main() {
         configuration::parse_config(Path::new(&args.config)).expect("Failed to read configuration");
 
     // Initialize logging
-    init_logging(&config);
+    init_logging(&config, args.verbose);
 
     // Parse connection strings
     let listeners: Arc<Mutex<VecDeque<Listener>>> = Arc::new(Mutex::new(VecDeque::new()));
@@ -371,7 +375,8 @@ fn parse_constring(raw: &str) -> Option<Listener> {
 /// # Arguments
 ///
 /// * `config`: Application configuration
-fn init_logging(config: &configuration::Configuration) {
+/// * `verbose`: Enable verbose log output
+fn init_logging(config: &configuration::Configuration, verbose: bool) {
     let log_config = ConfigBuilder::new()
         .set_time_format_custom(format_description!(
             "[day].[month].[year] [hour]:[minute]:[second].[subsecond digits:3]"
@@ -380,9 +385,15 @@ fn init_logging(config: &configuration::Configuration) {
 
     let mut loggers: Vec<Box<dyn SharedLogger>> = vec![];
 
+    let level = if verbose {
+        LevelFilter::Debug
+    } else {
+        LevelFilter::Info
+    };
+
     if config.logging.console {
         loggers.push(TermLogger::new(
-            LevelFilter::Debug,
+            level,
             log_config.clone(),
             TerminalMode::Mixed,
             ColorChoice::Auto,
@@ -391,7 +402,7 @@ fn init_logging(config: &configuration::Configuration) {
 
     if config.logging.file.enabled {
         loggers.push(WriteLogger::new(
-            LevelFilter::Info,
+            level,
             log_config,
             File::create(Path::new(&config.logging.file.filename))
                 .expect("Failed to create log file"),

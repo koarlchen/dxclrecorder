@@ -16,8 +16,10 @@ use simplelog::{
 use std::collections::VecDeque;
 use std::fs::File;
 use std::path::Path;
-use std::sync::atomic::{AtomicI32, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicI32, Ordering};
 use std::sync::{Arc, Mutex};
+use thiserror::Error;
+use tokio::io;
 use tokio::signal;
 use tokio::sync::{broadcast, mpsc};
 use tokio::task;
@@ -40,9 +42,19 @@ struct CliArgs {
     verbose: bool,
 }
 
+/// Errors while recording
+#[derive(Error, Debug)]
+pub enum RecordError {
+    #[error("Invalid connection string")]
+    InvalidConnectionString,
+
+    #[error("Failed to create/write data file")]
+    DataFileError(#[from] io::Error),
+}
+
 /// Application method.
 #[tokio::main]
-async fn main() {
+async fn main() -> Result<(), RecordError> {
     // Parse commandline arguments
     let args = CliArgs::parse();
 
@@ -62,7 +74,7 @@ async fn main() {
             }
             None => {
                 error!("Found invalid connection string: {}", constring);
-                return;
+                return Err(RecordError::InvalidConnectionString);
             }
         }
     }
@@ -70,12 +82,14 @@ async fn main() {
     // Communication channel between listeners and receiver to forward received lines
     let (tx, rx) = mpsc::unbounded_channel::<String>();
 
+    let receiver_running = Arc::new(AtomicBool::new(true));
+
     // Start receiver for incoming spots
-    let receiver = match start_receiver(config.clone(), rx).await {
+    let receiver = match start_receiver(config.clone(), rx, receiver_running.clone()).await {
         Ok(rcv) => rcv,
         Err(err) => {
             error!("Failed to start receiver ({})", err);
-            return;
+            return Err(RecordError::DataFileError(err));
         }
     };
 
@@ -115,6 +129,12 @@ async fn main() {
 
     // Main process loop
     while active_listeners.load(Ordering::Relaxed) > 0 {
+        // Check if the receiver is still running
+        if !receiver_running.load(Ordering::Relaxed) {
+            error!("Receiver stopped running");
+            break;
+        }
+
         // Check if a listener unexpectedly stopped running
         let mut dead_listener: Option<Listener> = None;
         let mut lis_guard = listeners.lock().unwrap();
@@ -170,9 +190,15 @@ async fn main() {
 
     // Drop last sender and join receiver thread
     drop(tx);
-    receiver.await.unwrap();
+
+    receiver
+        .await
+        .unwrap()
+        .map_err(RecordError::DataFileError)?;
 
     info!("Shutdown");
+
+    Ok(())
 }
 
 /// Start receiver for incoming spots.
@@ -182,15 +208,17 @@ async fn main() {
 ///
 /// * `config`: Application configuration
 /// * `rx`: Receiver of parsed spots
+/// * `rx_running`: State of receiver task
 ///
 /// # Result
 ///
-/// * `Ok(JoinHandle<()>)`: Returning the thread handle in case the receiver started successfully.
-/// * `Err(std::io::Error)`: Returning the error in case the initialization of the reciever failed.
+/// Returns the join handle if the receiver task was spawnd successfully.
+/// Otherwise the occurred error is returned.
 async fn start_receiver(
     config: configuration::Configuration,
-    mut rx: mpsc::UnboundedReceiver<String>,
-) -> Result<task::JoinHandle<()>, std::io::Error> {
+    rx: mpsc::UnboundedReceiver<String>,
+    rx_running: Arc<AtomicBool>,
+) -> Result<task::JoinHandle<Result<(), std::io::Error>>, std::io::Error> {
     // Create file writer if required
     let mut writer: Option<FileWriter> = None;
     if config.output.file.enabled {
@@ -206,44 +234,58 @@ async fn start_receiver(
 
     // Spawn task to handle received data from server
     let tsk = task::spawn(async move {
-        // Wait for new data
-        while let Some(line) = rx.recv().await {
-            // Try to parse spot
-            if let Ok(spot) = dxclparser::parse(&line) {
-                // Check if the parsed spot does not match to any of the filters
-                if match_filter(&spot, &config) {
-                    let entry = spot.to_json();
-
-                    // Write spot to console
-                    if config.output.console {
-                        println!("{}", entry);
-                    }
-
-                    // Write spot to file
-                    if config.output.file.enabled {
-                        writer
-                            .as_mut()
-                            .unwrap()
-                            .write(&entry)
-                            .await
-                            .expect("Failed to write data to file");
-                    }
-                }
-            }
-        }
-
-        // Flush file before quitting
-        if config.output.file.enabled {
-            writer
-                .as_mut()
-                .unwrap()
-                .flush()
-                .await
-                .expect("Failed to flush writer");
-        }
+        let res = receiver(config, rx, writer).await;
+        rx_running.store(false, Ordering::Relaxed);
+        res
     });
 
     Ok(tsk)
+}
+
+/// Receiver for spots
+///
+/// # Arguments
+///
+/// * `config`: Application configuration
+/// * `rx`: Receiver of parsed spots
+/// * `writer`: Filer writer
+///
+/// # Result
+///
+/// Returns unit type if stop was requested.
+/// In case of any error the error is returned.
+async fn receiver(
+    config: configuration::Configuration,
+    mut rx: mpsc::UnboundedReceiver<String>,
+    mut writer: Option<FileWriter>,
+) -> Result<(), io::Error> {
+    // Wait for new data
+    while let Some(line) = rx.recv().await {
+        // Try to parse spot
+        if let Ok(spot) = dxclparser::parse(&line) {
+            // Check if the parsed spot does not match to any of the filters
+            if match_filter(&spot, &config) {
+                let entry = spot.to_json();
+
+                // Write spot to console
+                if config.output.console {
+                    println!("{}", entry);
+                }
+
+                // Write spot to file
+                if config.output.file.enabled {
+                    writer.as_mut().unwrap().write(&entry).await?;
+                }
+            }
+        }
+    }
+
+    // Flush file before quitting
+    if config.output.file.enabled {
+        writer.as_mut().unwrap().flush().await?;
+    }
+
+    Ok(())
 }
 
 /// Match spot against filter rules.

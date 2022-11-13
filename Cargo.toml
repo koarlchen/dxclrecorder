@@ -24,3 +24,4 @@ time = "0.3.16"
 tokio = { version = "1.21.2", features = ["signal", "rt-multi-thread", "sync", "time", "fs", "io-util"] }
 chrono = "0.4.22"
 clap = { version = "4.0.19", features = ["derive"] }
+thiserror = "1.0.37"

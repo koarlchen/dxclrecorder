@@ -374,7 +374,7 @@ fn parse_constring(raw: &str) -> Option<Listener> {
 fn init_logging(config: &configuration::Configuration) {
     let log_config = ConfigBuilder::new()
         .set_time_format_custom(format_description!(
-            "[day].[month].[year] [hour]:[minute]:[second]"
+            "[day].[month].[year] [hour]:[minute]:[second].[subsecond digits:3]"
         ))
         .build();
 

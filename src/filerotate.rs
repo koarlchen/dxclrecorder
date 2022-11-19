@@ -45,6 +45,14 @@ impl FileWriter {
 
     /// Rotate file.
     /// Flush and close the previous file (if present) and create a new file.
+    ///
+    /// # Arguments
+    ///
+    /// * `date`: Date of the file to create
+    ///
+    /// # Result
+    ///
+    /// Nothing or the encountered error.
     async fn rotate(&mut self, date: Date<Utc>) -> Result<(), io::Error> {
         if self.writer.is_some() {
             self.flush().await?;

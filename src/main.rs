@@ -16,7 +16,7 @@ use simplelog::{
 use std::collections::VecDeque;
 use std::fs::File;
 use std::path::Path;
-use std::sync::atomic::{AtomicBool, AtomicI32, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use std::sync::{Arc, Mutex};
 use thiserror::Error;
 use tokio::io;
@@ -50,6 +50,9 @@ pub enum RecordError {
 
     #[error("Failed to create/write data file")]
     DataFileError(#[from] io::Error),
+
+    #[error("Invalid configuration")]
+    InvalidConfiguration(String),
 }
 
 /// Application method.
@@ -64,6 +67,12 @@ async fn main() -> Result<(), RecordError> {
 
     // Initialize logging
     init_logging(&config, args.verbose);
+
+    // Check number of connection strings
+    let num_configured_listeners = config.connection.constrings.len() as u32;
+    if num_configured_listeners == 0 {
+        return Err(RecordError::InvalidConfiguration("No connection strings found".into()))
+    }
 
     // Parse connection strings
     let listeners: Arc<Mutex<VecDeque<Listener>>> = Arc::new(Mutex::new(VecDeque::new()));
@@ -110,7 +119,7 @@ async fn main() -> Result<(), RecordError> {
     // Counter will be incremented before first connection attempt for each listener.
     // If the listener could not be connected to the server, even after several retries,
     // it will be removed and so the counter will be decremented.
-    let active_listeners: Arc<AtomicI32> = Arc::new(AtomicI32::new(0));
+    let active_listeners: Arc<AtomicU32> = Arc::new(AtomicU32::new(0));
 
     // Start all listeners and remove from them from the list afterwards
     // Each listener will be added again after its successful connect attempt.
@@ -128,7 +137,7 @@ async fn main() -> Result<(), RecordError> {
     });
 
     // Main process loop
-    while active_listeners.load(Ordering::Relaxed) > 0 {
+    while active_listeners.load(Ordering::Relaxed) == num_configured_listeners {
         // Check if the receiver is still running
         if !receiver_running.load(Ordering::Relaxed) {
             error!("Receiver stopped running");
@@ -338,7 +347,7 @@ fn match_filter(spot: &dxclparser::Spot, config: &configuration::Configuration) 
 fn connect_listener(
     mut listener: Listener,
     listeners: Arc<Mutex<VecDeque<Listener>>>,
-    active_listeners: Arc<AtomicI32>,
+    active_listeners: Arc<AtomicU32>,
     config: configuration::Configuration,
     tx: mpsc::UnboundedSender<String>,
     mut shtdwn: broadcast::Receiver<()>,

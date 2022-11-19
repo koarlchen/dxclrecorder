@@ -14,7 +14,6 @@ pub struct FileWriter {
     last_modification: Date<Utc>,
     writer: Option<BufWriter<File>>,
     rotate: bool,
-    date: bool,
 }
 
 impl FileWriter {
@@ -29,13 +28,12 @@ impl FileWriter {
     /// # Result
     ///
     /// Returns a new instance or propagates an error while initialization.
-    pub async fn new(fname: PathBuf, rotate: bool, date: bool) -> Result<Self, io::Error> {
+    pub async fn new(fname: PathBuf, rotate: bool) -> Result<Self, io::Error> {
         let mut new = Self {
             filename: fname,
             last_modification: Utc::today(),
             writer: None,
             rotate,
-            date,
         };
 
         new.rotate(new.last_modification).await?;
@@ -59,29 +57,17 @@ impl FileWriter {
             self.writer = None;
         }
 
-        let filename = match self.date {
-            true => {
-                let ext = self
-                    .filename
-                    .extension()
-                    .expect("Given filename does not include an extension");
-                let prefix = self.filename.with_extension("");
-                format!(
-                    "{}_{:04}{:02}{:02}.{}",
-                    prefix.display(),
-                    date.year(),
-                    date.month(),
-                    date.day(),
-                    ext.to_str().unwrap()
-                )
-            }
-            false => self.filename.display().to_string(),
-        };
+        let date_str = format!("{:04}{:02}{:02}", date.year(), date.month(), date.day());
+        let fname = self
+            .filename
+            .display()
+            .to_string()
+            .replace("{DATE}", &date_str);
 
         let file = OpenOptions::new()
             .create(true)
             .append(true)
-            .open(filename)
+            .open(fname)
             .await?;
         self.writer = Some(BufWriter::with_capacity(1024, file));
 

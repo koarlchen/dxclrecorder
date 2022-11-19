@@ -33,7 +33,6 @@ pub struct Output {
 #[derive(Serialize, Deserialize, Clone)]
 pub struct OutputFile {
     pub enabled: bool,
-    pub date: bool,
     pub rotate: bool,
     pub filename: String,
 }

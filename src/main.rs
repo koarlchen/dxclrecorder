@@ -71,7 +71,9 @@ async fn main() -> Result<(), RecordError> {
     // Check number of connection strings
     let num_configured_listeners = config.connection.constrings.len() as u32;
     if num_configured_listeners == 0 {
-        return Err(RecordError::InvalidConfiguration("No connection strings found".into()))
+        return Err(RecordError::InvalidConfiguration(
+            "No connection strings found".into(),
+        ));
     }
 
     // Parse connection strings
@@ -234,8 +236,7 @@ async fn start_receiver(
         writer = Some(
             FileWriter::new(
                 Path::new(&config.output.file.filename).to_path_buf(),
-                false,
-                true,
+                config.output.file.rotate,
             )
             .await?,
         );

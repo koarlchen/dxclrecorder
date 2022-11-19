@@ -11,9 +11,8 @@
         "console": true,
         "file": {
             "enabled": false,
-            "date": true,
             "rotate": true,
-            "filename": "./out/data.json"
+            "filename": "./out/data_{DATE}.json"
         }
     },
     "logging": {

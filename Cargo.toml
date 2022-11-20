@@ -11,7 +11,7 @@ keywords = ["ham", "ham-radio", "dxcluster", "cluster"]
 
 
 [dependencies]
-dxcllistener = { path = "/media/max/hdd/Bibliothek/dev/Cluster/libdxcllistener_rs/" }
+dxcllistener = "1.0.0"
 dxclparser = "1.0.1"
 hambands = "0.1.2"
 serde = { version = "1.0.147", features = ["derive"] }

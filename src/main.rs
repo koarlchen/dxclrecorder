@@ -328,7 +328,7 @@ fn match_filter(spot: &dxclparser::Spot, config: &configuration::Configuration) 
             if let Ok(band) = hambands::search::get_band_for_frequency(dx.freq) {
                 config.filter.band.contains(&band.name.into())
             } else {
-                warn!("Failed to get band for freq {} Hz", dx.freq);
+                debug!("Failed to get band for freq {} Hz", dx.freq);
                 false
             }
         }

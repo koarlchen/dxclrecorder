@@ -2,7 +2,7 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
-use chrono::{Date, Datelike, Utc};
+use chrono::{DateTime, Datelike, Utc};
 use std::path::PathBuf;
 use tokio::fs::{File, OpenOptions};
 use tokio::io::{self, AsyncWriteExt, BufWriter};
@@ -11,7 +11,7 @@ use tokio::io::{self, AsyncWriteExt, BufWriter};
 /// Supports adding a date to the filename and rotate the file daily.
 pub struct FileWriter {
     filename: PathBuf,
-    last_modification: Date<Utc>,
+    last_modification: DateTime<Utc>,
     writer: Option<BufWriter<File>>,
     rotate: bool,
 }
@@ -31,7 +31,7 @@ impl FileWriter {
     pub async fn new(fname: PathBuf, rotate: bool) -> Result<Self, io::Error> {
         let mut new = Self {
             filename: fname,
-            last_modification: Utc::today(),
+            last_modification: Utc::now(),
             writer: None,
             rotate,
         };
@@ -51,7 +51,7 @@ impl FileWriter {
     /// # Result
     ///
     /// Nothing or the encountered error.
-    async fn rotate(&mut self, date: Date<Utc>) -> Result<(), io::Error> {
+    async fn rotate(&mut self, date: DateTime<Utc>) -> Result<(), io::Error> {
         if self.writer.is_some() {
             self.flush().await?;
             self.writer = None;
@@ -84,7 +84,7 @@ impl FileWriter {
     ///
     /// Nothing or the encountered error.
     pub async fn write(&mut self, data: &str) -> Result<(), io::Error> {
-        let now = Utc::today();
+        let now = Utc::now();
 
         if now > self.last_modification && self.rotate {
             self.rotate(now).await?;

@@ -160,7 +160,7 @@ async fn main() -> Result<(), RecordError> {
         if let Some(mut dead) = dead_listener {
             let res = dead.join().await.unwrap_err();
 
-            println!(
+            warn!(
                 "Listener {}@{}:{} stopped unexpectedly ({})",
                 dead.callsign, dead.host, dead.port, res
             );
@@ -287,6 +287,8 @@ async fn receiver(
                     writer.as_mut().unwrap().write(&entry).await?;
                 }
             }
+        } else {
+            debug!("Failed to parse spot: '{}'", line);
         }
     }
 
@@ -326,7 +328,7 @@ fn match_filter(spot: &dxclparser::Spot, config: &configuration::Configuration) 
             if let Ok(band) = hambands::search::get_band_for_frequency(dx.freq) {
                 config.filter.band.contains(&band.name.into())
             } else {
-                error!("Failed to get band for freq {}", dx.freq);
+                warn!("Failed to get band for freq {} Hz", dx.freq);
                 false
             }
         }
@@ -368,12 +370,16 @@ fn connect_listener(
                     break;
                 },
                 res = listener.listen(tx.clone(), time::Duration::from_secs(1)) => {
-                    if res.is_ok() {
-                        info!("Listener {} connected", listener);
-                        listeners.lock().unwrap().push_back(listener);
-                        break;
+                    match res {
+                        Ok(_) => {
+                            info!("Listener {} connected", listener);
+                            listeners.lock().unwrap().push_back(listener);
+                            break;
+                        }
+                        Err(err) => {
+                            warn!("Attempt to connect failed for {} ({})", listener, err);
+                        }
                     }
-                    info!("Attempt to connect failed for {}", listener);
                 }
             }
 

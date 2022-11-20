@@ -7,8 +7,6 @@ extern crate log;
 
 use clap::Parser;
 use dxcllistener::Listener;
-use lazy_static::lazy_static;
-use regex::Regex;
 use simplelog::{
     format_description, ColorChoice, CombinedLogger, ConfigBuilder, LevelFilter, SharedLogger,
     TermLogger, TerminalMode, WriteLogger,
@@ -71,33 +69,18 @@ async fn main() -> Result<(), RecordError> {
     info!("Startup");
 
     // Check number of connection strings
-    let num_configured_listeners = config.connection.constrings.len() as u32;
+    let num_configured_listeners = config.connection.servers.len() as u32;
     if num_configured_listeners == 0 {
         return Err(RecordError::InvalidConfiguration(
             "No connection strings found".into(),
         ));
     }
 
-    // Parse connection strings
-    let listeners: Arc<Mutex<VecDeque<Listener>>> = Arc::new(Mutex::new(VecDeque::new()));
-    for constring in config.connection.constrings.iter() {
-        match parse_constring(constring) {
-            Some(info) => {
-                listeners.lock().unwrap().push_back(info);
-            }
-            None => {
-                error!("Found invalid connection string: {}", constring);
-                return Err(RecordError::InvalidConnectionString);
-            }
-        }
-    }
-
     // Communication channel between listeners and receiver to forward received lines
     let (tx, rx) = mpsc::unbounded_channel::<String>();
 
-    let receiver_running = Arc::new(AtomicBool::new(true));
-
     // Start receiver for incoming spots
+    let receiver_running = Arc::new(AtomicBool::new(true));
     let receiver = match start_receiver(config.clone(), rx, receiver_running.clone()).await {
         Ok(rcv) => rcv,
         Err(err) => {
@@ -119,26 +102,31 @@ async fn main() -> Result<(), RecordError> {
         tmp_tx.send(()).unwrap();
     });
 
-    // Refelects the number of present listeners.
+    // List of all active listeners
+    let listeners: Arc<Mutex<VecDeque<Listener>>> = Arc::new(Mutex::new(VecDeque::new()));
+
+    // Reflects the number of present listeners.
     // Counter will be incremented before first connection attempt for each listener.
     // If the listener could not be connected to the server, even after several retries,
     // it will be removed and so the counter will be decremented.
-    let active_listeners: Arc<AtomicU32> = Arc::new(AtomicU32::new(0));
+    let active_listeners: Arc<AtomicU32> = Arc::new(AtomicU32::new(num_configured_listeners));
 
-    // Start all listeners and remove from them from the list afterwards
-    // Each listener will be added again after its successful connect attempt.
-    listeners.lock().unwrap().retain_mut(|l| {
-        active_listeners.fetch_add(1, Ordering::Relaxed);
+    // Start all listeners.
+    // Each listener will be added to the list of active listeners after its successful connect attempt.
+    for server in config.connection.servers.iter() {
         connect_listener(
-            Listener::new(l.host.clone(), l.port, l.callsign.clone()),
+            Listener::new(
+                server.hostname.clone(),
+                server.port,
+                server.callsign.clone(),
+            ),
             listeners.clone(),
             active_listeners.clone(),
             config.clone(),
             tx.clone(),
             shtdwn_tx.subscribe(),
-        );
-        false
-    });
+        )
+    }
 
     // Main process loop
     while active_listeners.load(Ordering::Relaxed) == num_configured_listeners {
@@ -400,34 +388,6 @@ fn connect_listener(
             }
         }
     });
-}
-
-/// Parse connection string from configuration.
-///
-/// # Arguments
-///
-/// * `raw`: Raw connection string in the format call@host:port
-///
-/// # Result
-///
-/// If the format of the connection string is valid a new `Listener` is returned.
-fn parse_constring(raw: &str) -> Option<Listener> {
-    lazy_static! {
-        static ref RE_CONSTR: Regex =
-            Regex::new(r#"^(?P<user>.+)@(?P<host>.+):(?P<port>\d+)$"#).unwrap();
-    }
-
-    if let Some(cap) = RE_CONSTR.captures(raw) {
-        let user = cap.name("user").unwrap().as_str();
-        let host = cap.name("host").unwrap().as_str();
-        let port = cap.name("port").unwrap().as_str().parse::<u16>();
-
-        if let Ok(p) = port {
-            return Some(Listener::new(host.into(), p, user.into()));
-        }
-    }
-
-    None
 }
 
 /// Initialize logging setup.

@@ -1,7 +1,7 @@
 {
     "connection": {
-        "constrings": [
-            "INVALID@example.com:1234"
+        "servers": [
+            { "callsign": "INVALID", "hostname": "example.com", "port": 1234 }
         ],
         "reconnect": true,
         "retries": 10,
@@ -10,7 +10,7 @@
     "output": {
         "console": true,
         "file": {
-            "enabled": false,
+            "enabled": true,
             "rotate": true,
             "filename": "./out/data_{DATE}.json"
         }
@@ -18,7 +18,7 @@
     "logging": {
         "console": true,
         "file": {
-            "enabled": false,
+            "enabled": true,
             "filename": "./out/recorder.log"
         }
     },

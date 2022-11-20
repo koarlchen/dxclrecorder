@@ -17,10 +17,17 @@ pub struct Configuration {
 
 #[derive(Serialize, Deserialize, Clone)]
 pub struct Connection {
-    pub constrings: Vec<String>,
+    pub servers: Vec<Server>,
     pub reconnect: bool,
     pub retries: u64,
     pub backoff: u64,
+}
+
+#[derive(Serialize, Deserialize, Clone)]
+pub struct Server {
+    pub callsign: String,
+    pub hostname: String,
+    pub port: u16,
 }
 
 #[derive(Serialize, Deserialize, Clone)]

@@ -14,7 +14,7 @@ use simplelog::{
     TermLogger, TerminalMode, WriteLogger,
 };
 use std::collections::VecDeque;
-use std::fs::File;
+use std::fs;
 use std::path::Path;
 use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use std::sync::{Arc, Mutex};
@@ -66,7 +66,9 @@ async fn main() -> Result<(), RecordError> {
         configuration::parse_config(Path::new(&args.config)).expect("Failed to read configuration");
 
     // Initialize logging
-    init_logging(&config, args.verbose);
+    init_logging(&config, args.verbose)?;
+
+    info!("Startup");
 
     // Check number of connection strings
     let num_configured_listeners = config.connection.constrings.len() as u32;
@@ -434,7 +436,7 @@ fn parse_constring(raw: &str) -> Option<Listener> {
 ///
 /// * `config`: Application configuration
 /// * `verbose`: Enable verbose log output
-fn init_logging(config: &configuration::Configuration, verbose: bool) {
+fn init_logging(config: &configuration::Configuration, verbose: bool) -> Result<(), RecordError> {
     let log_config = ConfigBuilder::new()
         .set_time_format_custom(format_description!(
             "[day].[month].[year] [hour]:[minute]:[second].[subsecond digits:3]"
@@ -459,13 +461,16 @@ fn init_logging(config: &configuration::Configuration, verbose: bool) {
     }
 
     if config.logging.file.enabled {
-        loggers.push(WriteLogger::new(
-            level,
-            log_config,
-            File::create(Path::new(&config.logging.file.filename))
-                .expect("Failed to create log file"),
-        ))
+        let file = fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(Path::new(&config.logging.file.filename))
+            .map_err(|err| RecordError::InvalidConfiguration(err.to_string()))?;
+
+        loggers.push(WriteLogger::new(level, log_config, file))
     }
 
     CombinedLogger::init(loggers).unwrap();
+
+    Ok(())
 }

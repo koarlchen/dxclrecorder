@@ -17,6 +17,6 @@ The application configuration happens within the `dxclrecorder.json`. The filena
 
 ## Build and Run
 
-To build the application run `cargo build [--release]`. The application itself is not os dependent. For Linux the `musl` target can be used if for example problems between different glibc version occur (build and run happens on different machines).
+To build the application run `cargo build [--release]`. The application itself is not os dependent.
 
 Before running the recorder adjust the configuration file to your needs. For a simple test just add a connection string to your preferred cluster server. Afterwards run the application. Now both the log information and the cluster spots will be printed to the console.

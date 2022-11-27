@@ -11,7 +11,7 @@ keywords = ["ham", "ham-radio", "dxcluster", "cluster"]
 
 
 [dependencies]
-dxcllistener = "1.0.0"
+dxcllistener = "1.0.1"
 dxclparser = "1.0.1"
 hambands = "0.1.2"
 serde = { version = "1.0.147", features = ["derive"] }

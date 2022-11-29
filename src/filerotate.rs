@@ -2,18 +2,34 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
+use async_compression::tokio::write::GzipEncoder;
+use async_compression::Level;
 use chrono::{DateTime, Datelike, Utc};
 use std::path::PathBuf;
-use tokio::fs::{File, OpenOptions};
-use tokio::io::{self, AsyncWriteExt, BufWriter};
+use tokio::fs::{self, File, OpenOptions};
+use tokio::io::{self, AsyncWriteExt, BufReader, BufWriter};
+use tokio::time::{Duration, Instant};
 
 /// Custom handler to write to file.
 /// Supports adding a date to the filename and rotate the file daily.
 pub struct FileWriter {
-    filename: PathBuf,
+    /// Configured filename
+    config_filename: PathBuf,
+
+    /// Currently used filename
+    current_filename: Option<String>,
+
+    /// Date of last modification
     last_modification: DateTime<Utc>,
+
+    /// Buffered writer for data file
     writer: Option<BufWriter<File>>,
+
+    /// File rotation enabled
     rotate: bool,
+
+    /// File compression enabled
+    compress: bool,
 }
 
 impl FileWriter {
@@ -28,12 +44,14 @@ impl FileWriter {
     /// # Result
     ///
     /// Returns a new instance or propagates an error while initialization.
-    pub async fn new(fname: PathBuf, rotate: bool) -> Result<Self, io::Error> {
+    pub async fn new(fname: PathBuf, rotate: bool, compress: bool) -> Result<Self, io::Error> {
         let mut new = Self {
-            filename: fname,
+            config_filename: fname,
+            current_filename: None,
             last_modification: Utc::now(),
             writer: None,
             rotate,
+            compress,
         };
 
         new.rotate(new.last_modification).await?;
@@ -52,14 +70,35 @@ impl FileWriter {
     ///
     /// Nothing or the encountered error.
     async fn rotate(&mut self, date: DateTime<Utc>) -> Result<(), io::Error> {
+        // Flush writer with last data
         if self.writer.is_some() {
             self.flush().await?;
             self.writer = None;
         }
 
+        // Compress file (if enabled)
+        if self.compress && self.current_filename.is_some() {
+            let fname_curr = self.current_filename.as_ref().unwrap().clone();
+            let mut fname_out = fname_curr.clone();
+            fname_out.push_str(".gz");
+
+            tokio::task::spawn(async move {
+                match compress(&fname_curr, &fname_out).await {
+                    Ok(dur) => {
+                        info!("Compressed data file (took {} msec)", dur.as_millis());
+                        if fs::remove_file(fname_curr).await.is_err() {
+                            warn!("Failed to remove file after compression");
+                        }
+                    }
+                    Err(err) => warn!("Failed to compress data file ({})", err),
+                }
+            });
+        }
+
+        // Open new file
         let date_str = format!("{:04}{:02}{:02}", date.year(), date.month(), date.day());
         let fname = self
-            .filename
+            .config_filename
             .display()
             .to_string()
             .replace("{DATE}", &date_str);
@@ -67,9 +106,11 @@ impl FileWriter {
         let file = OpenOptions::new()
             .create(true)
             .append(true)
-            .open(fname)
+            .open(&fname)
             .await?;
         self.writer = Some(BufWriter::with_capacity(1024, file));
+
+        self.current_filename = Some(fname);
 
         Ok(())
     }
@@ -112,4 +153,29 @@ impl FileWriter {
     pub async fn flush(&mut self) -> Result<(), io::Error> {
         self.writer.as_mut().unwrap().flush().await
     }
+}
+
+/// Compress file with gzip.
+///
+/// # Arguments
+///
+/// - `fname_in`: Name of file to compress
+/// - `fname_out`: Name of file to write compressed data to
+///
+/// # Result
+///
+/// Duration of compression or the encountered error.
+pub async fn compress(fname_in: &String, fname_out: &String) -> io::Result<Duration> {
+    let input_file = File::open(fname_in).await?;
+    let mut input = BufReader::new(input_file);
+
+    let output = File::create(fname_out).await?;
+    let mut encoder = GzipEncoder::with_quality(output, Level::Best);
+
+    let before = Instant::now();
+    io::copy(&mut input, &mut encoder).await?;
+    encoder.shutdown().await?;
+    let after = Instant::now();
+
+    Ok(after - before)
 }

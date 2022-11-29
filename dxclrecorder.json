@@ -10,15 +10,16 @@
     "output": {
         "console": true,
         "file": {
-            "enabled": true,
+            "enabled": false,
             "rotate": true,
+            "compress": true,
             "filename": "./out/data_{DATE}.json"
         }
     },
     "logging": {
         "console": true,
         "file": {
-            "enabled": true,
+            "enabled": false,
             "filename": "./out/recorder.log"
         }
     },

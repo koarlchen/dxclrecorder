@@ -41,6 +41,7 @@ pub struct Output {
 pub struct OutputFile {
     pub enabled: bool,
     pub rotate: bool,
+    pub compress: bool,
     pub filename: String,
 }
 

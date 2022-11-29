@@ -227,6 +227,7 @@ async fn start_receiver(
             FileWriter::new(
                 Path::new(&config.output.file.filename).to_path_buf(),
                 config.output.file.rotate,
+                config.output.file.compress,
             )
             .await?,
         );

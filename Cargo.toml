@@ -23,3 +23,4 @@ tokio = { version = "1.22.0", features = ["signal", "rt-multi-thread", "sync", "
 chrono = "0.4.23"
 clap = { version = "4.0.27", features = ["derive"] }
 thiserror = "1.0.37"
+async-compression = { version = "0.3.15", features = ["tokio", "gzip"] }

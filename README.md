@@ -29,7 +29,7 @@ The log output will be pushed to the `console` (`stdout`) and/or directly to a f
 
 ### Filter
 
-Filters for the `type` and the `band` can be applied to each received spot, whereby filtering the band only applies for spots of the type `DX`. Each type of spot can be allowed or filtered out. The band filter array contains all bands that shall be kept. Spots with different bands will be ignored. Spots, that do not match any band will also be ignored. In case of an empty filter array all spots will be kept.
+Filters for the `type` and the `band` can be applied to each received spot, whereby filtering the band only applies for spots of the type `DX`. Each type of spot can be allowed or filtered out. The band filter array contains all bands that shall be kept. Spots with different bands will be ignored. Spots, that do not match any band will also be ignored. In case of an empty filter array all spots will be kept. The identifier for each band is defined [here](https://docs.rs/crate/hambands/0.1.2/source/src/band/mod.rs).
 
 
 ## Build and Run

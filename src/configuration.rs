@@ -50,6 +50,8 @@ pub struct Logging {
     pub console: bool,
     #[serde(rename = "file")]
     pub file: LoggingFile,
+    #[serde(default)]
+    pub verbose: bool,
 }
 
 #[derive(Serialize, Deserialize, Clone)]

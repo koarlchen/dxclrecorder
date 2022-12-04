@@ -64,7 +64,7 @@ async fn main() -> Result<(), RecordError> {
         configuration::parse_config(Path::new(&args.config)).expect("Failed to read configuration");
 
     // Initialize logging
-    init_logging(&config, args.verbose)?;
+    init_logging(&config, args.verbose || config.logging.verbose)?;
 
     info!("Startup");
 

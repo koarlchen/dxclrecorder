@@ -316,7 +316,9 @@ fn match_filter(spot: &dxclparser::Spot, config: &configuration::Configuration) 
     // Filter for band
     let band = match spot {
         dxclparser::Spot::DX(dx) => {
-            if let Ok(band) = hambands::search::get_band_for_frequency(dx.freq) {
+            if config.filter.band.is_empty() {
+                true
+            } else if let Ok(band) = hambands::search::get_band_for_frequency(dx.freq) {
                 config.filter.band.contains(&band.name.into())
             } else {
                 debug!("Failed to get band for freq {}", spot.to_json());

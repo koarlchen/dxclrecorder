@@ -127,7 +127,7 @@ impl FileWriter {
     pub async fn write(&mut self, data: &str) -> Result<(), io::Error> {
         let now = Utc::now();
 
-        if now.date() > self.last_modification.date() && self.rotate {
+        if now.date_naive() > self.last_modification.date_naive() && self.rotate {
             self.rotate(now).await?;
         }
 

@@ -189,10 +189,13 @@ async fn main() -> Result<(), RecordError> {
     }
 
     // Join all stopped listeners
-    while let Some(mut lis) = listeners.lock().unwrap().pop_front() {
-        // TODO: clippy warns about a present mutex guard from the line above in combination with calling await.
-        // The mutex guard should already be dropped when working with the removed element (remove happens by pop_front)
-        lis.join().await.unwrap();
+    loop {
+        let element = listeners.lock().unwrap().pop_front();
+        if let Some(mut lis) = element {
+            lis.join().await.unwrap();
+        } else {
+            break;
+        }
     }
 
     // Drop last sender and join receiver thread

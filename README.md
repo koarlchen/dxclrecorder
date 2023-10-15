@@ -4,9 +4,10 @@ A recorder for spots published by DX cluster servers.
 The recorder is able to connect to multiple servers in parallel.
 All received spots will be parsed into JSON and pushed to the configured output channels.
 
-The clients may be reconnected to the cluster servers if configured.
-If a client finally wasn't able to establish a connection, the program will exit.
-In case you wish that the program should not exit upon a single connection error you may run multiple instances in parallel.
+The clients are able to reconnect to their cluster servers with a specified backoff time and a maximum number of retries.
+Check the configuration section for more details.
+If a single client finally wasn't able to establish a connection, the program will exit and therefore all other potentially healthy clients will be disconnected too.
+In case you wish that the program should not exit upon a single lost connection you may run multiple instances in parallel.
 
 
 ## Usage

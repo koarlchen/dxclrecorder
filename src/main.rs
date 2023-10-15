@@ -59,9 +59,15 @@ async fn main() -> Result<(), RecordError> {
     // Parse commandline arguments
     let args = CliArgs::parse();
 
-    // Read json configuration
-    let config =
-        configuration::parse_config(Path::new(&args.config)).expect("Failed to read configuration");
+    // Read configuration from file
+    let config = configuration::parse_config(Path::new(&args.config));
+    if let Err(e) = config {
+        return Err(RecordError::InvalidConfiguration(format!(
+            "Failed to read configuration: {}",
+            e
+        )));
+    }
+    let config = config.unwrap();
 
     // Initialize logging
     init_logging(&config, args.verbose || config.logging.verbose)?;

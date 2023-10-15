@@ -189,13 +189,9 @@ async fn main() -> Result<(), RecordError> {
     }
 
     // Join all stopped listeners
-    loop {
-        let element = listeners.lock().unwrap().pop_front();
-        if let Some(mut lis) = element {
-            lis.join().await.unwrap();
-        } else {
-            break;
-        }
+    // The special construct to get a value from the vector is required since otherwise a MutexGuard is held across an await point
+    for mut car in std::iter::from_fn(|| listeners.lock().unwrap().pop_front()) {
+        car.join().await.unwrap();
     }
 
     // Drop last sender and join receiver thread

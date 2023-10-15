@@ -30,6 +30,8 @@ Options:
 
 The application configuration happens within the `dxclrecorder.json` file.
 The filename can be adjusted by a commandline option, see `--help`.
+Note that the configuration is not checked against invalid selections.
+
 
 - `connection`:
     

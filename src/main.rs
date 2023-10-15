@@ -143,14 +143,14 @@ async fn main() -> Result<(), RecordError> {
         }
 
         // Check if a listener unexpectedly stopped running
-        let mut dead_listener: Option<Listener> = None;
-        let mut lis_guard = listeners.lock().unwrap();
-        if let Some(pos) = lis_guard.iter().position(|x| !x.is_running()) {
-            dead_listener = lis_guard.remove(pos);
-        }
-        // NOTE: clippy does not recognize explicit drop of mutex guard (causes clippy::await_holding_lock)
-        // See also here: https://github.com/rust-lang/rust-clippy/issues/6446
-        drop(lis_guard);
+        let dead_listener: Option<Listener> = {
+            let mut lis_guard = listeners.lock().unwrap();
+            if let Some(pos) = lis_guard.iter().position(|x| !x.is_running()) {
+                lis_guard.remove(pos)
+            } else {
+                None
+            }
+        };
 
         // Handle a possible found dead listener
         if let Some(mut dead) = dead_listener {

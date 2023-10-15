@@ -142,18 +142,18 @@ async fn main() -> Result<(), RecordError> {
             break;
         }
 
-        // Check if a listener unexpectedly stopped running
-        let dead_listener: Option<Listener> = {
-            let mut lis_guard = listeners.lock().unwrap();
-            if let Some(pos) = lis_guard.iter().position(|x| !x.is_running()) {
-                lis_guard.remove(pos)
-            } else {
-                None
+        // Check if listeners unexpectedly stopped running
+        let mut dead_listeners: Vec<Listener> = Vec::new();
+        {
+            let mut listeners = listeners.lock().unwrap();
+            // TODO Use `Vec::extract_if` if stabilized (currently nightly)
+            while let Some(pos) = listeners.iter().position(|x| !x.is_running()) {
+                dead_listeners.push(listeners.remove(pos).unwrap());
             }
-        };
+        }
 
-        // Handle a possible found dead listener
-        if let Some(mut dead) = dead_listener {
+        // Handle possible found dead listeners
+        while let Some(mut dead) = dead_listeners.pop() {
             let res = dead.join().await.unwrap_err();
 
             warn!(
